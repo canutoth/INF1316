@@ -1,0 +1,299 @@
+﻿[INF1316] Lab 1 - Luana Pinho Bueno Penha (2312082), Theo Jesus Canuto de Sousa (2311293)
+
+
+1. Faça um programa para criar dois processos, o pai escreve seu pid e espera o filho terminar e o filho escreve o seu pid e termina.
+
+
+Código fonte do programa q1.c:
+
+
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+
+int main(void){
+  int mypid, pid, status;
+  pid = fork();
+  if (pid!=0){ //Pai
+        mypid = getpid();
+        printf("parent's pid: %d\n", mypid);
+        waitpid(-1, &status, 0);
+  }
+  else { //Filho
+        printf("child's pid: %d\n",getpid());
+        exit(3);
+  }
+  return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+~/inf1316/lab1$ gcc -o main q1.c
+~/inf1316/lab1$ ./main
+
+
+Saída gerada:
+
+
+parent's pid: 1586
+child's pid: 1587
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+
+
+Ao usar a função fork(), o processo pai cria um novo processo (o filho). No processo pai, o valor retornado por fork() é o PID do filho, que é um número positivo. Já no processo filho, o valor retornado por fork() é 0, indicando que ele é o novo processo. Na saída gerada, o PID do pai é 1586, e o PID do filho é 1587, ou seja, o filho tem o PID "x + 1" em relação ao pai. Isso acontece porque, em sistemas operacionais, os PIDs geralmente são alocados de forma sequencial, ou seja, o filho recebe o próximo número disponível. Porém, isso não é uma regra rígida, já que depende do momento e da disponibilidade dos números de PID. No fim das contas, o processo pai conhece o PID do filho, enquanto o filho só sabe que foi criado e que seu fork() retornou 0, mas não sabe o PID do pai diretamente.
+
+
+2. Agora, usando a mesma estrutura de processos pai e filho, declare uma variável visível ao pai e ao filho, no pai inicialize a variável com 1 e imprima seu valor antes do fork(). No filho, altere o valor da variável para 5 e imprima o seu valor antes do exit(). Agora, no pai, imprima novamente o valor da variável após o filho ter alterado a variável - após a waitpid(). Justifique os resultados obtidos.
+
+
+Código fonte do programa q2.c:
+
+
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+
+int main(void){
+  int mypid, pid, status;
+  int var = 1;
+  printf("value of var: %d\n", var);
+  pid = fork();
+  if (pid!=0){ //Pai
+            mypid = pid;
+            waitpid(-1, &status, 0);
+            printf("var value after child: %d\n", var);
+  }
+  else { //Filho
+            var = 5;
+            printf("child's var value: %d\n",var);
+            exit(3);
+  }
+  return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+~/inf1316/lab1$ gcc -o main q2.c
+~/inf1316/lab1$ ./main
+
+
+Saída gerada:
+
+
+value of var: 1
+child's var value: 5
+var value after child: 1
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+
+
+Quando o processo pai chama fork(), ele cria uma cópia do seu próprio processo, inclusive da variável var. Ou seja, o pai e o filho passam a ter cópias separadas dessa variável na memória. No programa, o pai inicializa a variável com 1 e imprime esse valor. Depois, o filho muda a variável para 5 e imprime o valor, mas essa mudança só afeta a cópia da variável no processo filho. O pai, que está esperando o filho terminar com o waitpid(), imprime sua própria versão da variável, que ainda está igual a 1, pois as mudanças feitas no filho não afetam o pai. Isso acontece porque, depois do fork(), os dois processos (pai e filho) são independentes, com suas próprias versões da memória, e não há compartilhamento direto de dados entre eles.
+
+
+3. Use o programa anterior para ler e ordenar um vetor de 10 posições. O filho ordena o vetor e o pai exibe os dados do vetor antes do fork() e depois do waitpid(). Eles usarão o mesmo vetor na memória? Justifique.
+
+
+Código fonte do programa q3.c:
+
+
+  if (pid!=0){ //Pai
+        mypid = pid;
+        waitpid(-1, &status, 0);
+        printf("\narray after child process:\n");
+        for (int i = 0; i<10; i++) printf("index %d: %d\n", i, v[i]);
+  }
+  else { //Filho
+
+
+        for (int i = 0; i < 10; i++){
+                for (int j = i; j < 10; j++){
+                        if (v[i] > v[j]){
+                        int temp = v[i];
+                        v[i] = v[j];
+                        v[j] = temp;
+                        }
+                }
+        }
+
+
+        printf("\narray in the child process:\n");
+
+
+        for (int i = 0; i<10; i++) printf("index %d: %d\n", i+1, v[i]);
+
+
+        exit(3);
+  }
+
+
+  return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+~/inf1316/lab1$ gcc -o main q3.c
+~/inf1316/lab1$ ./main
+
+
+Saída gerada:
+
+
+array before child process:
+index 0: 1
+index 1: 5
+index 2: 2
+index 3: 8
+index 4: 4
+index 5: 9
+index 6: 6
+index 7: 3
+index 8: 10
+index 9: 7
+
+
+array in the child process:
+index 1: 1
+index 2: 2
+index 3: 3
+index 4: 4
+index 5: 5
+index 6: 6
+index 7: 7
+index 8: 8
+index 9: 9
+index 10: 10
+
+
+array after child process:
+index 0: 1
+index 1: 5
+index 2: 2
+index 3: 8
+index 4: 4
+index 5: 9
+index 6: 6
+index 7: 3
+index 8: 10
+index 9: 7
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+
+
+O comportamento observado aqui é semelhante ao que aconteceu na questão anterior, onde o pai e o filho têm cópias independentes da memória após o fork(). No caso do vetor, isso significa que o pai e o filho trabalham com versões separadas do vetor. O filho altera o vetor e o ordena, mas essa mudança só afeta a cópia do vetor que está na memória do filho. O pai, que espera o filho terminar com o waitpid(), ainda vê a versão original do vetor, porque a memória foi duplicada quando o fork() foi chamado e os dois processos passaram a ter espaços de memória independentes. Ou seja, eles não usam o mesmo vetor na memória. Cada processo tem sua própria versão dele, e mudanças feitas no filho não afetam o pai.
+
+
+4. Modifique o programa anterior para que o filho execute um programa elaborado por você, que mande imprimir uma mensagem qualquer no vídeo, por exemplo, “alo mundo”. Em seguida, altere o programa do item 4 para o filho executar o programa echo da shell.
+
+
+Código fonte do programa:
+
+
+q4.c:
+
+
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+
+int main(void){
+  int mypid, pid, status;
+  pid = fork();
+  if (pid!=0){ //Pai
+        mypid = pid;
+        waitpid(-1, &status, 0);
+  }
+  else { //Filho
+        execlp("./aux4", "aux4", (char *) NULL);
+        perror("execlp failed");
+        exit(3);
+  }
+  return 0;
+}
+
+
+aux4.c:
+
+
+#include <stdio.h>
+
+
+int main(void){
+        printf("alo mundo\n");
+        return 0;
+} 
+
+
+q4echo:
+
+
+#include <sys/types.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+
+int main(void){
+  int mypid, pid, status;
+  pid = fork();
+  if (pid!=0){ //Pai
+        mypid = pid;
+        waitpid(-1, &status, 0);
+  }
+  else { //Filho
+        execlp("/bin/echo", "echo", "alo mundo! alo echo!", (char *)NULL);
+        perror("execlp failed");
+        exit(3);
+  }
+  return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa principal:
+
+
+~/inf1316/lab1$ gcc -o aux4 aux4.c
+~/inf1316/lab1$ gcc -o main q4.c
+~/inf1316/lab1$ ./main
+
+
+Linhas de comando para compilação e execução do programa echo:
+:~/inf1316/lab1$ gcc -o alomundo q4echo.c
+~/inf1316/lab1$ ./alomundo
+
+
+Saída gerada no programa principal:
+
+
+alo mundo
+
+
+Saída gerada no programa echo:
+
+
+alo mundo! alo echo!
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+
+
+Em ambos os exemplos, o filho substitui seu código com o programa especificado no execlp(). No primeiro exemplo (aux4.c), o filho executa um programa personalizado que imprime "alo mundo", enquanto no segundo exemplo (q4echo.c), o filho executa o comando echo da shell, imprimindo uma mensagem diferente. O importante é que o execlp() faz o filho substituir seu processo atual, impedindo que o código original do filho seja executado após sua chamada. Isso também significa que o processo pai não tem conhecimento do que o filho faz após o execlp(), e o uso de waitpid() garante que o pai só continue após o filho terminar. Embora ambos os exemplos usem o execlp(), o primeiro requer um caminho para o programa, enquanto o segundo utiliza um comando padrão do sistema, que é encontrado automaticamente. Esse comportamento é essencial para a substituição de programas em sistemas Unix/Linux.

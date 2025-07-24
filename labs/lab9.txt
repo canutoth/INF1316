@@ -1,0 +1,272 @@
+﻿[INF1316] Lab 9 - Luana Pinho Bueno Penha (2312082), Theo Jesus Canuto de Sousa (2311293)
+
+
+4. Escreva dois programas prog1.c e prog2.c que trocam dados através de um mesmo arquivo mapeado para memória (de cada um). 
+
+
+Código fonte do programa prog1.c:
+
+
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+
+
+#define FILEPATH "mmap_ipc.bin"
+#define BUFSZ 4096
+
+
+int main(int argc, char *argv[]) {
+    const char *msg = (argc > 1) ? argv[1] : "Hello from prog1";
+    size_t msglen   = strlen(msg) + 1;
+
+
+    int fd = open(FILEPATH, O_RDWR | O_CREAT, 0666);
+    if (fd == -1) { perror("open"); return 1; }
+
+
+    if (ftruncate(fd, BUFSZ) == -1) { perror("ftruncate"); return 1; }
+
+
+    char *map = mmap(NULL, BUFSZ, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (map == MAP_FAILED) { perror("mmap"); return 1; }
+
+
+    map[0] = 0;
+    memcpy(map + 1, msg, msglen);
+    map[0] = 1;
+
+
+    msync(map, msglen + 1, MS_SYNC);
+    munmap(map, BUFSZ);
+    close(fd);
+    return 0;
+}
+
+
+Código fonte do programa prog2.c:
+
+
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+
+
+#define FILEPATH "mmap_ipc.bin"
+#define BUFSZ 4096
+
+
+int main(void) {
+    int fd = open(FILEPATH, O_RDWR);
+    if (fd == -1) { perror("open"); return 1; }
+
+
+    char *map = mmap(NULL, BUFSZ, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (map == MAP_FAILED) { perror("mmap"); return 1; }
+
+
+    while (map[0] == 0) { /* busy-wait */ }
+
+
+    printf("Received: %s\n", map + 1);
+
+
+    map[0] = 0;
+    munmap(map, BUFSZ);
+    close(fd);
+    return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+Terminal 1:
+~/inf1316/lab9$ gcc -o prog1 prog1.c
+~/inf1316/lab9$ gcc -o prog2 prog2.c
+~/inf1316/lab9$ ./prog1 olamundo
+
+
+Terminal 2:
+~/inf1316/lab9$ ./prog2
+
+
+Saída gerada:
+Received: olamundo
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+
+
+Esse resultado acontece porque os dois programas compartilham exatamente a mesma região de memória física por meio do mmap() com a flag MAP_SHARED. O prog1 cria (ou ajusta) o arquivo, grava a mensagem a partir do byte 1 e, em seguida, define o byte 0 como 1 para indicar que os dados estão prontos; como a área é mapeada em modo compartilhado, essa escrita se torna visível imediatamente ao prog2, que possui o mesmo arquivo mapeado. O prog2 fica em um loop de espera ativa até perceber que o byte 0 mudou de 0 para 1; então lê a string a partir do byte 1 e a imprime. Todo o trânsito de dados ocorre dentro de páginas de memória compartilhada, sem cópias adicionais nem chamadas extras de sistema, demonstrando como o mapeamento de arquivos pode ser um mecanismo simples e eficiente de comunicação entre processos.
+
+
+5. Escreva um programa que faz um mapeamento de arquivo para memória e depois escreve novos caracteres no final do arquivo. O que você precisa fazer para evitar um SegFault?
+
+
+Código fonte do programa q5.c :
+
+
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <string.h>
+
+
+int main(int argc, char *argv[]) {
+    if (argc < 3) {
+        fprintf(stderr, "Uso: %s <ficheiro> \"texto a acrescentar\"\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+
+    const char *path  = argv[1];
+    const char *extra = argv[2];
+    size_t      extra_len = strlen(extra);
+
+
+    int fd = open(path, O_RDWR);
+    if (fd == -1) { perror("open"); exit(EXIT_FAILURE); }
+
+
+    struct stat sb;
+    if (fstat(fd, &sb) == -1) { perror("fstat"); exit(EXIT_FAILURE); }
+    off_t old_size = sb.st_size;
+    off_t new_size = old_size + extra_len;
+
+
+    if (ftruncate(fd, new_size) == -1) { perror("ftruncate"); exit(EXIT_FAILURE); }
+
+
+    char *map = mmap(NULL, new_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (map == MAP_FAILED) { perror("mmap"); exit(EXIT_FAILURE); }
+
+
+    memcpy(map + old_size, extra, extra_len);
+
+
+    if (msync(map, new_size, MS_SYNC) == -1) { perror("msync"); }
+
+
+    munmap(map, new_size);
+    close(fd);
+    return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+~/inf1316/lab9$ echo "ola mundo" > q5.txt
+~/inf1316/lab9$ gcc -o q5 q5.c
+~/inf1316/lab9$ ./q5 q5.txt "adicionando conteudo via mmap"
+
+
+Saída gerada:
+
+
+q5.txt:
+ola mundo
+adicionando conteudo via mmap
+
+
+Reflexão sobre a razão de ter obtido esse resultado: 
+
+
+O programa funciona sem dar Segmentation Fault porque, antes de escrever além do fim original do arquivo, ele aumenta fisicamente o tamanho do arquivo com ftruncate() e só depois cria (ou recria) o mapeamento com o novo tamanho. Se tentássemos copiar os novos caracteres numa área que estivesse fora do intervalo inicialmente mapeado, o kernel detectaria acesso a uma página não alocada e enviaria SIGSEGV; ao estender o arquivo primeiro, garantimos que todas as páginas necessárias existem e pertencem à mesma região mapeada. Assim, o memcpy() copia “adicionando conteúdo via mmap” logo após o texto “ola mundo”, o msync() força a persistência em disco, e o arquivo final reflete exatamente a concatenação esperada. Portanto, o ponto-chave para evitar o SegFault é sempre garantir, via ftruncate() (ou mremap()), que o arquivo e o mapeamento já cubram o intervalo onde os novos dados serão escritos.
+
+
+6. Re-escreva o seu programa do item anterior usando mremap()
+
+
+Código fonte do programa q6.c :
+
+
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+
+
+static void die(const char *msg) { perror(msg); exit(EXIT_FAILURE); }
+
+
+int main(int argc, char *argv[]) {
+    if (argc < 3) {
+        fprintf(stderr, "uso: %s <ficheiro> \"texto extra\"\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+    const char *path  = argv[1];
+    const char *extra = argv[2];
+    size_t      extlen = strlen(extra);
+
+
+    int fd = open(path, O_RDWR | O_CREAT, 0666);
+    if (fd == -1) die("open");
+
+
+    struct stat sb;
+    if (fstat(fd, &sb) == -1) die("fstat");
+    off_t oldsz = sb.st_size;
+    long  pagesz = sysconf(_SC_PAGESIZE);
+
+
+    off_t newsz = ((oldsz + extlen - 1) / pagesz + 1) * pagesz;
+    if (ftruncate(fd, newsz) == -1) die("ftruncate");
+
+
+    char *map = mmap(NULL, oldsz, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (map == MAP_FAILED) die("mmap");
+
+
+    map = mremap(map, oldsz, newsz, MREMAP_MAYMOVE);
+    if (map == MAP_FAILED) die("mremap");
+
+
+    memcpy(map + oldsz, extra, extlen); 
+    if (msync(map, oldsz + extlen, MS_SYNC) == -1) die("msync");
+
+
+    munmap(map, newsz);
+    close(fd);
+    return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+~/inf1316/lab9$ echo "ola mundo" > q6.txt
+~/inf1316/lab9$ gcc -o q6 q6.c
+~/inf1316/lab9$ ./q6 q6.txt "adicionando conteudo via mremap"
+
+
+Saída gerada:
+
+
+q6.txt:
+ola mundo
+adicionando conteudo via mremap
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+
+
+O texto extra apareceu no fim do arquivo porque o programa primeiro aumentou o tamanho físico do arquivo com ftruncate() e, em seguida, redimensionou o mapeamento em tempo de execução com mremap() para cobrir o novo espaço, tudo sem precisar desalocar e mapear de novo. Ao usar MREMAP_MAYMOVE, o kernel pôde realocar a região se necessário, garantindo que o ponteiro devolvido continue válido. Dessa forma, o ponteiro map passou a enxergar as páginas recém-criadas, permitindo que memcpy() gravasse “adicionando conteudo via mremap” logo após “ola mundo” sem gerar SIGSEGV. Por fim, msync() forçou a escrita no disco, de modo que o arquivo persistiu exatamente o conteúdo concatenado. Esse fluxo demonstra como mremap() simplifica a expansão de mapeamentos e evita o overhead de chamadas adicionais, mantendo a comunicação direta com o arquivo de forma segura.

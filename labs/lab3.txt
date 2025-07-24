@@ -1,0 +1,371 @@
+﻿[INF1316] Lab 3 - Luana Pinho Bueno Penha (2312082), Theo Jesus Canuto de Sousa (2311293)
+
+
+1. Execute o programa “ctrl-c.c”. Digite Ctrl-C e Ctrl-\. Analise o resultado. Neste mesmo programa, remova os comandos signal( ) e repita o teste anterior observando os resultados.
+
+
+Código fonte do programa ctrl-c.c:
+
+
+#include <stdio.h>
+#include <signal.h>
+#include <stdlib.h>
+#define EVER ;;
+void intHandler(int sinal);
+void quitHandler(int sinal);
+
+
+int main (void) {
+void (*p)(int); // ponteiro para função que recebe int como
+// parâmetro
+p = signal(SIGINT, intHandler);
+printf("Endereco do manipulador anterior %p\n", p);
+p = signal(SIGQUIT, quitHandler);
+printf("Endereco do manipulador anterior %p\n", p);
+puts ("Ctrl-C desabilitado. Use Ctrl-\\ para terminar");
+for(EVER);
+}
+void intHandler(int sinal){
+printf("Você pressionou Ctrl-C (%d) \n", sinal);
+}
+void quitHandler(int sinal){
+printf("Terminando o processo...\n");
+exit (0);
+}
+
+
+Código fonte do programa ctrl-c-alterado.c:
+
+
+#include <stdio.h>
+#include <signal.h>
+#include <stdlib.h>
+#define EVER ;;
+
+
+int main (void) {
+puts ("Ctrl-C habilitado. Use ctrl-c para apenas terminar o processo ou ctrl-\\ para terminar o processo e gerar core dump");
+for(EVER);
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+~/inf1316/lab3$ gcc -o main ctrl-c.c
+~/inf1316/lab3$ ./main
+~/inf1316/lab3$ gcc -o main ctrl-c-alterado.c
+~/inf1316/lab3$ ./main
+
+
+Saída gerada:
+
+
+ctrl-c.c:
+
+
+Endereco do manipulador anterior (nil)
+Endereco do manipulador anterior (nil)
+Ctrl-C desabilitado. Use Ctrl-\ para terminar
+^CVocê pressionou Ctrl-C (2)
+^\Terminando o processo…
+
+
+ctrl-c-alterado.c com ctrl-\:
+
+
+Ctrl-C habilitado. Use ctrl-c para apenas terminar o processo ou ctrl-\ para terminar o processo e gerar core dump
+^\Quit (core dumped)
+
+
+ctrl-c-alterado.c com ctrl-c:
+Ctrl-C habilitado. Use ctrl-c para apenas terminar o processo ou ctrl-\ para terminar o processo e gerar core dump
+^C
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+        No programa original, quando pressionamos ctrl-c, o handler intHandler é executado e mostra a mensagem: "Você pressionou Ctrl-C (2)", mas o programa não termina, continua executando. Isso ocorre porque o sinal SIGINT (Ctrl-C) foi capturado e tratado. Quando pressionamos ctrl-\, o handler quitHandler é executado e mostra a mensagem: "Terminando o processo...", e então o programa termina com exit(0).
+        Se removermos os comandos signal(), o sistema volta a agir como seu default. O comportamento default do SIGINT (ctrl-c) é terminar o processo, então o programa termina imediatamente sem mensagem nenhuma. O comportamento default do SIGQUIT (ctrl-\) é terminar o processo e gerar core dump, então o programa termina imediatamente e mostra "Quit (core dumped)".
+
+
+2. Tente fazer um programa para interceptar o sinal SIGKILL. Você conseguiu? Explique.
+
+
+Código fonte do programa q2.c:
+
+
+#include <stdio.h>
+#include <signal.h>
+#include <unistd.h>
+
+
+int main() {
+    // Tenta definir um handler para SIGKILL
+    signal(SIGKILL, SIG_IGN);  // Tenta ignorar o sinal
+    
+    printf("PID: %d - Tente me matar com 'kill -9 %d'\n", getpid(), getpid());
+    
+    while(1) {
+        sleep(1);
+        printf("Ainda rodando...\n");
+    }
+    
+    return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+~/inf1316/lab3$ gcc -o main q2.c
+~/inf1316/lab3$ ./main
+
+
+Saída gerada:
+
+
+PID: 558 - Tente me matar com 'kill -9 558'
+Ainda rodando...
+Ainda rodando...
+Ainda rodando...
+Ainda rodando...
+Ainda rodando…
+[...]
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+        Não. Não é possível interceptar ou capturar o sinal SIGKILL em um programa, pois é um sinal especial que o sistema operacional usa para terminar imediatamente um processo. Ele foi projetado intencionalmente para não poder ser capturado, ignorado ou bloqueado. Logo, o handler criado não é executado e o programa fica printando "Ainda rodando…" até que o processo seja interrompido, por exemplo, com ctrl-c.
+
+
+3. Execute e explique o funcionamento de filhocidio.c
+
+
+Código fonte do programa filhocidio.c:
+
+
+void childhandler(int signo);
+int delay;
+int main (int argc, char *argv[]){
+pid_t pid;
+signal(SIGCHLD, childhandler);
+if ((pid = fork()) < 0){
+fprintf(stderr, "Erro ao criar filho\n");
+exit(-1);
+}
+if (pid == 0) /* child */
+execve(argv[2], 0, 0); /* ou sleep(3);*/
+else /* parent */{
+sscanf(argv[1], "%d", &delay); /* read delay from command line */
+sleep(delay);
+printf("Program %s exceeded limit of %d seconds!\n", argv[2], delay);
+kill(pid, SIGKILL);
+sleep(1); /* necessary for SIGCHLD to arrive */
+}
+return 0;
+}
+
+
+void childhandler(int signo) /* Executed if child dies before parent */ {
+int status;
+pid_t pid = wait(&status);
+printf("Child %d terminated within %d seconds com estado %d.\n", pid, delay, status);
+exit(0);
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+~/inf1316/lab3$ gcc -o filhocidio filhocidio.c
+~/inf1316/lab3$ ./filhocicio 5 "sleep 10"
+~/inf1316/lab3$ ./filhocidio 2 "sleep 1"
+
+
+Saída gerada:
+
+
+para os argumentos '5 "sleep 10"'
+Child 2930 terminated within 5 seconds com estado 0.
+
+
+para os argumentos '2 "sleep 1"'
+Program sleep 1 exceeded limit of 2 seconds!
+Child 2934 terminated within 2 seconds com estado 9.
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+
+
+O programa funciona como um controlador de tempo para processos, onde o processo pai monitora o tempo de execução do processo filho. O pai começa configurando um manipulador de sinal para SIGCHLD, que será acionado caso o filho termine antes do tempo estipulado. Em seguida, ele cria um processo filho usando fork().
+Se o programa for executado como filho, ele substitui sua execução pelo comando passado como argumento (argv[2]) usando execve(). Enquanto isso, o processo pai lê o tempo limite a partir dos argumentos da linha de comando (argv[1]) e aguarda esse período em sleep(delay).
+Comportamento observado na saída gerada:
+Quando o filho termina dentro do prazo (ex: ./timeout 5 "sleep 3"), o manipulador childhandler exibe "Child [PID] terminated within 5 seconds com estado 0", indicando conclusão normal.
+Se o filho excede o tempo (ex: ./timeout 2 "sleep 5"), o pai imprime "Program [comando] exceeded limit of [X] seconds!" e força a terminação com SIGKILL, resultando em "Child [PID] terminated within [X] seconds com estado 9" (status 9 = processo morto pelo sinal).
+Caso o filho termine sua execução dentro do tempo definido, o sistema operacional envia um sinal SIGCHLD ao pai, ativando a função childhandler. Essa função coleta o status de término do filho, informa que ele finalizou dentro do prazo e encerra o programa.
+Porém, se o filho ainda estiver em execução após o tempo limite, o pai imprime uma mensagem indicando que o processo excedeu o tempo permitido e então envia um sinal SIGKILL para forçar seu término. Um breve sleep(1) é adicionado para garantir que o sinal SIGCHLD, gerado quando o filho é finalizado, seja processado antes que o pai possa encerrar. Dessa forma, o programa garante que o processo filho não execute por mais tempo que o desejado, seja terminando naturalmente ou sendo interrompido pelo pai.
+
+
+4. Usando SIGSTOP e SIGCONT faça um programa que crie 2 processos filho e alterne a execução dos filhos. Após 10 trocas de contexto, o processo pai mata os processos filho. OBS: Os processos filho são formados por loops infinitos.
+
+
+Código fonte do programa q4.c:
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <signal.h>
+#include <sys/wait.h>
+
+
+#define NUM_TROCAS 10
+
+
+int main() {
+    pid_t filho1, filho2;
+    int trocas = 0;
+
+
+    if ((filho1 = fork()) == 0) {
+        while(1) {
+            printf("Filho 1 (PID: %d) executando...\n", getpid());
+            sleep(1);  // Para não sobrecarregar a saída
+        }
+        exit(0);
+    }
+
+
+    if ((filho2 = fork()) == 0) {
+        while(1) {
+            printf("Filho 2 (PID: %d) executando...\n", getpid());
+            sleep(1);  // Para não sobrecarregar a saída
+        }
+        exit(0);
+    }
+
+
+    printf("Pai (PID: %d) criou filhos: %d e %d\n", getpid(), filho1, filho2);
+
+
+    kill(filho2, SIGSTOP);
+
+
+    while(trocas < NUM_TROCAS) {
+        sleep(2);
+
+
+        if (trocas % 2 == 0) {
+            printf("\nPai: Parando filho 1 e continuando filho 2\n");
+            kill(filho1, SIGSTOP);
+            kill(filho2, SIGCONT);
+        } else {
+            printf("\nPai: Parando filho 2 e continuando filho 1\n");
+            kill(filho2, SIGSTOP);
+            kill(filho1, SIGCONT);
+        }
+
+
+        trocas++;
+        printf("Troca %d/%d concluída\n", trocas, NUM_TROCAS);
+    }
+
+
+    printf("\nPai: Terminando processos filhos após %d trocas\n", NUM_TROCAS);
+    kill(filho1, SIGKILL);
+    kill(filho2, SIGKILL);
+
+
+    wait(NULL);
+    wait(NULL);
+
+
+    printf("Pai: Processos filhos terminados. Fim.\n");
+    return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+~/inf1316/lab3$ gcc -o main q4.c
+~/inf1316/lab3$ ./main
+
+
+Saída gerada:
+
+
+Filho 1 (PID: 578) executando...
+Pai (PID: 577) criou filhos: 578 e 579
+Filho 2 (PID: 579) executando...
+Filho 1 (PID: 578) executando...
+Filho 1 (PID: 578) executando...
+
+
+Pai: Parando filho 1 e continuando filho 2
+Troca 1/10 concluída
+Filho 2 (PID: 579) executando...
+Filho 2 (PID: 579) executando...
+
+
+Pai: Parando filho 2 e continuando filho 1
+Troca 2/10 concluída
+Filho 1 (PID: 578) executando...
+Filho 1 (PID: 578) executando...
+
+
+Pai: Parando filho 1 e continuando filho 2
+Troca 3/10 concluída
+Filho 2 (PID: 579) executando...
+Filho 2 (PID: 579) executando...
+
+
+Pai: Parando filho 2 e continuando filho 1
+Troca 4/10 concluída
+Filho 1 (PID: 578) executando...
+Filho 1 (PID: 578) executando...
+
+
+Pai: Parando filho 1 e continuando filho 2
+Troca 5/10 concluída
+Filho 2 (PID: 579) executando...
+Filho 2 (PID: 579) executando...
+
+
+Pai: Parando filho 2 e continuando filho 1
+Troca 6/10 concluída
+Filho 1 (PID: 578) executando...
+Filho 1 (PID: 578) executando...
+
+
+Pai: Parando filho 1 e continuando filho 2
+Troca 7/10 concluída
+Filho 2 (PID: 579) executando...
+Filho 2 (PID: 579) executando...
+
+
+Pai: Parando filho 2 e continuando filho 1
+Troca 8/10 concluída
+Filho 1 (PID: 578) executando...
+Filho 1 (PID: 578) executando...
+
+
+Pai: Parando filho 1 e continuando filho 2
+Troca 9/10 concluída
+Filho 2 (PID: 579) executando...
+Filho 2 (PID: 579) executando...
+
+
+Pai: Parando filho 2 e continuando filho 1
+Troca 10/10 concluída
+
+
+Pai: Terminando processos filhos após 10 trocas
+Pai: Processos filhos terminados. Fim.
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+
+
+Esse exercício mostra na prática como um sistema operacional gerencia processos. Usando SIGSTOP e SIGCONT, o processo pai consegue pausar e retomar seus filhos como um "chefe" controlando tarefas - exatamente como o SO faz nos bastidores para dividir o tempo da CPU entre vários programas.
+Já o SIGKILL no final é como um "fim de linha" definitivo: mesmo com loops infinitos, os filhos são forçados a encerrar. Isso prova que o sistema operacional mantém o controle total quando necessário.
+No fim, o código simulou de forma simples o que o SO faz o tempo todo: orquestrar processos, garantindo que tudo funcione de maneira organizada.

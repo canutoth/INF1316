@@ -1,0 +1,634 @@
+﻿[INF1316] Lab 2 - Luana Pinho Bueno Penha (2312082), Theo Jesus Canuto de Sousa (2311293)
+
+
+1. Faça um programa para somar matrizes de acordo com o seguinte algoritmo: O primeiro processo irá criar duas matrizes preenchidas e uma terceira vazia em 3 áreas de memória compartilhada. Para cada linha da matriz solução, o seu programa deverá gerar um processo para o seu cálculo.
+
+
+Código fonte do programa q1.c:
+
+
+#include <stdio.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <sys/wait.h>
+
+
+#define SIZE 3
+
+
+void sum(int *matrixA, int *matrixB, int *matrixS, int line, int columns) {
+    for (int j = 0; j < columns; j++) {
+        matrixS[line * columns + j] = matrixA[line * columns + j] + matrixB[line * columns + j];
+    }
+}
+
+
+int main(int argc, char *argv[]) {
+    int segA, segB, segS, *matrixA, *matrixB, *matrixS;
+    int id, pid, status;
+
+
+    // Aloca memória compartilhada para as matrizes
+    segA = shmget(IPC_PRIVATE, SIZE * SIZE * sizeof(int), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+    segB = shmget(IPC_PRIVATE, SIZE * SIZE * sizeof(int), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+    segS = shmget(IPC_PRIVATE, SIZE * SIZE * sizeof(int), IPC_CREAT | IPC_EXCL | S_IRUSR | S_IWUSR);
+
+
+    // Associa a memória compartilhada ao processo
+    matrixA = (int *)shmat(segA, 0, 0);
+    matrixB = (int *)shmat(segB, 0, 0);
+    matrixS = (int *)shmat(segS, 0, 0);
+
+
+    int exampleA[SIZE][SIZE] = {
+        {1, 2, 3},
+        {4, 5, 6},
+        {7, 8, 9}
+    };
+
+
+    int exampleB[SIZE][SIZE] = {
+        {9, 8, 7},
+        {6, 5, 4},
+        {3, 2, 1}
+    };
+
+
+    for (int i = 0; i < SIZE; i++) {
+        for (int j = 0; j < SIZE; j++) {
+            matrixA[i * SIZE + j] = exampleA[i][j];
+            matrixB[i * SIZE + j] = exampleB[i][j];
+        }
+    }
+    
+    printf("matriz A:\n");
+    for (int i = 0; i < SIZE; i++) {
+        for (int j = 0; j < SIZE; j++) {
+            printf("%d ", matrixA[i * SIZE + j]);
+        }
+        printf("\n");
+    }
+
+
+    printf("matriz B:\n");
+    for (int i = 0; i < SIZE; i++) {
+        for (int j = 0; j < SIZE; j++) {
+            printf("%d ", matrixB[i * SIZE + j]);
+        }
+        printf("\n");
+    }
+
+
+    // Cria um processo para cada linha da matriz solução
+    for (int i = 0; i < SIZE; i++) {
+        if ((id = fork()) < 0) {
+            puts("Erro na criação do novo processo");
+            exit(-2);
+        }
+        else if (id == 0) {
+            sum(matrixA, matrixB, matrixS, i, SIZE);
+            printf("Processo filho (linha %d) fez a soma: ", i);
+            for (int j = 0; j < SIZE; j++) {
+                printf("%d ", matrixS[i * SIZE + j]);
+        }
+           printf("\n");
+            exit(0);
+        }
+    }
+
+
+    // O processo pai aguarda todos os filhos
+    for (int i = 0; i < SIZE; i++) {
+        wait(&status);
+    }
+
+
+    printf("matriz A + B:\n");
+    for (int i = 0; i < SIZE; i++) {
+        for (int j = 0; j < SIZE; j++) {
+            printf("%d ", matrixS[i * SIZE + j]);
+        }
+        printf("\n");
+    }
+
+
+    shmdt(matrixA);
+    shmdt(matrixB);
+    shmdt(matrixS);
+
+
+    shmctl(segA, IPC_RMID, 0);
+    shmctl(segB, IPC_RMID, 0);
+    shmctl(segS, IPC_RMID, 0);
+
+
+    return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+~/inf1316/lab2$ gcc -o main q1.c
+~/inf1316/lab2$ ./main
+
+
+Saída gerada:
+
+
+matriz A:
+1 2 3
+4 5 6
+7 8 9
+matriz B:
+9 8 7
+6 5 4
+3 2 1
+Processo filho (linha 0) fez a soma: 10 10 10
+Processo filho (linha 1) fez a soma: 10 10 10
+Processo filho (linha 2) fez a soma: 10 10 10
+matriz A + B:
+10 10 10
+10 10 10
+10 10 10
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+
+
+Através da execução deste programa, podemos observar a interação entre processos e memória compartilhada em sistemas operacionais. O uso de memória compartilhada permite que múltiplos processos (neste caso, os filhos) acessem e modifiquem dados de maneira eficiente, sem a necessidade de copiar grandes estruturas de dados. Cada processo filho é responsável por calcular a soma de uma linha das matrizes, demonstrando como o sistema operacional gerencia a criação de processos através de chamadas como fork(), a comunicação entre esses processos e o uso de wait() para sincronização.
+
+
+Questão 2) Faça um programa que: leia uma mensagem do dia do stdin (ou arquivo), crie uma memória compartilhada com a chave 8752, salve a mensagem na memória.  Faça um outro programa “cliente” que utilize a mesma chave (8752) e exiba a mensagem do dia para o usuário.
+
+
+Código fonte do primeiro programa q2.c: 
+
+
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+
+
+#define TAMANHO_MAX 1024
+#define CHAVE 8752
+
+
+int main() {
+   int segmento;
+  
+   // Criar ou obter memória compartilhada
+   segmento = shmget(CHAVE, TAMANHO_MAX, IPC_CREAT | S_IRUSR | S_IWUSR);
+   if (segmento == -1) {
+       perror("Erro ao criar/acessar memória compartilhada");
+       exit(1);
+   }
+
+
+   // Anexar memória compartilhada
+   char *mensagem = (char *)shmat(segmento, NULL, 0);
+   if (mensagem == (char *)-1) {
+       perror("Erro ao anexar memória compartilhada");
+       exit(1);
+   }
+
+
+   printf("Digite a mensagem do dia: ");
+   fgets(mensagem, TAMANHO_MAX, stdin);
+
+
+   printf("Mensagem salva na memória compartilhada: %s\n", mensagem);
+
+
+   return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa q2.c:
+
+
+~/inf1316/lab2$ gcc -o main q2.c
+~/inf1316/lab2$ ./main
+
+
+Saída gerada:
+"Digite a mensagem do dia:”
+Inseri a mensagem: “Bom dia” e ele printou: 
+"Mensagem salva na memória compartilhada: Bom dia"
+
+
+
+
+Código fonte do programa qCliente.c:
+
+
+
+
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#define CHAVE 8752
+#define TAMANHO_MAX 1024
+
+
+int main() {
+   int segmento;
+   char *mensagem;
+
+
+   segmento = shmget(CHAVE, TAMANHO_MAX, S_IRUSR | S_IWUSR);
+   if (segmento == -1) {
+       perror("Erro ao acessar memória compartilhada");
+       exit(1);
+   }
+
+
+   mensagem = (char *)shmat(segmento, NULL, 0);
+   if (mensagem == (char *)-1) {
+       perror("Erro ao anexar memória");
+       exit(1);
+   }
+
+
+   // Exibir a mensagem armazenada
+   printf("Mensagem do dia recebida: %s\n", mensagem);
+
+
+   // Desanexar a memória compartilhada
+   shmdt(mensagem);
+
+
+   return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa qCliente.:
+
+
+~/inf1316/lab2$ gcc -o cliente qCliente.c
+~/inf1316/lab2$ ./cliente
+
+
+Saída gerada:
+"Mensagem do dia recebida: Bom dia"
+
+
+Reflexão sobre a razão de ter obtido os resultados dos programas: 
+Este programa demonstra o uso de memória compartilhada para a comunicação entre dois processos independentes. O primeiro programa (q2.c) cria uma região de memória compartilhada associada à chave 8752 e armazena nela uma mensagem inserida pelo usuário. O segundo programa (qCliente.c) acessa essa mesma região de memória e exibe a mensagem armazenada.
+Esse método ilustra uma abordagem eficiente para compartilhar informações entre processos, eliminando a necessidade de copiar dados e possibilitando uma comunicação rápida e direta.
+
+
+
+
+
+
+3. Faça um programa paralelo (com pelo menos 4 processos) para localizar uma chave em
+um vetor. Crie uma memória compartilhada com dados numéricos inteiros e desordenados e a divida pelo número de processos. Cada processo deve procurar o dado na sua área de memória e informar a posição onde o dado foi localizado.
+
+
+Código fonte do programa q3.c: 
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+
+#define KEY 8752
+#define VECTOR_SIZE 20 
+#define NUM_PROCESSES 4
+
+
+int main() {
+   int segmento;
+   int *shared_vector;
+   int segment_size = VECTOR_SIZE / NUM_PROCESSES;
+   int search_key;
+   int i, status;
+
+
+   segmento = shmget(KEY, VECTOR_SIZE * sizeof(int), IPC_CREAT | 0666);
+   if (segmento == -1) {
+       perror("shmget failed");
+       exit(EXIT_FAILURE);
+   }
+
+
+   shared_vector = (int *)shmat(segmento, NULL, 0);
+   if (shared_vector == (int *)-1) {
+       perror("shmat failed");
+       exit(EXIT_FAILURE);
+   }
+
+
+   printf("Vetor da memória compartilhada:\n");
+   int initial_values[VECTOR_SIZE] = {
+       45, 12, 89, 34, 67, 23, 56, 78, 90, 11,
+       33, 66, 99, 22, 55, 88, 44, 77, 10, 30
+   };
+  
+   for (i = 0; i < VECTOR_SIZE; i++) {
+       shared_vector[i] = initial_values[i];
+       printf("%d ", shared_vector[i]);
+       if ((i+1) % 10 == 0) printf("\n");
+   }
+   printf("\n");
+
+
+   printf("Digite o valor a ser buscado: ");
+   scanf("%d", &search_key);
+
+
+   // processos filho
+   for (i = 0; i < NUM_PROCESSES; i++) {
+       pid_t pid = fork();
+      
+       if (pid == 0) { // processo filho
+           int start = i * segment_size;
+           int end = (i == NUM_PROCESSES-1) ? VECTOR_SIZE : start + segment_size;
+          
+           printf("Processo %d buscando de %d a %d\n", getpid(), start, end-1);
+          
+           for (int j = start; j < end; j++) {
+               if (shared_vector[j] == search_key) {
+                   printf("Processo %d encontrou o valor %d na posição %d\n",
+                          getpid(), search_key, j);
+                   shmdt(shared_vector);
+                   exit(0);
+               }
+           }
+          
+           printf("Processo %d não encontrou o valor na sua região\n", getpid());
+           shmdt(shared_vector);
+           exit(0);
+       } else if (pid < 0) {
+           perror("fork failed");
+           exit(EXIT_FAILURE);
+       }
+   }
+
+
+   // Processo pai espera esperando os filhos
+   for (i = 0; i < NUM_PROCESSES; i++) {
+       wait(&status);
+   }
+
+
+   shmdt(shared_vector);
+   shmctl(segmento, IPC_RMID, NULL);
+
+
+   return 0;
+}
+
+
+
+
+
+
+Linhas de comando para compilação e execução do programa q3:
+
+
+~/inf1316/lab2$ gcc -o q3 q3.c
+~/inf1316/lab2$ ./q3
+
+
+Saída gerada: 
+"Vetor da memória compartilhada:
+45 12 89 34 67 23 56 78 90 11 
+33 66 99 22 55 88 44 77 10 30 
+
+
+Digite o valor a ser buscado: 
+“
+Depois disso, eu digitei como exemplo: 67
+
+
+Resposta: 
+
+“Processo 2311 buscando de 0 a 4
+Processo 2311 encontrou o valor 67 na posição 4
+Processo 2312 buscando de 5 a 9
+Processo 2312 não encontrou o valor na sua região
+Processo 2313 buscando de 10 a 14
+Processo 2313 não encontrou o valor na sua região
+Processo 2314 buscando de 15 a 19
+Processo 2314 não encontrou o valor na sua região
+”
+
+
+Reflexão sobre a razão de ter obtido o resultado do programa: 
+Este programa demonstra como múltiplos processos podem colaborar de forma eficiente usando memória compartilhada. O processo pai cria uma única região de memória compartilhada, contendo um vetor de números inteiros desordenados, e divide a tarefa de busca entre quatro processos filhos. Cada filho examina uma seção do vetor independentemente, sem interferência dos outros. 
+Se um processo encontrar o número procurado, ele imprime a posição e finaliza sua execução. No entanto, os outros processos continuam suas buscas, pois são independentes. Enquanto isso, o processo pai aguarda a finalização de todos os filhos usando wait(), garantindo que todos completem sua busca antes de liberar a memória compartilhada. 
+
+
+4. Faça um programa que: Tenha um processo pai que abre dois blocos de memória compartilhada, m1 e m2; cria dois processos filho (use exec), P1 e P2: estes também fazem attach em m1 ou m2 respectivamente; cada um dá um sleep() randômico e escreve um valor int na área compartilhada dele, e avisa o processo pai que um novo valor foi gerado, escrevendo também um número de sequência; o pai fica em loop verificando se houve um novo valor. Apenas quando ambos P1 e P2 geraram um novo valor, o pai imprime o produto dos valores gerados por P1 e P2.
+
+
+Código fonte do programa q4.c:
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+
+int main() {
+    int *m1, *m2;
+    int seg1, seg2;
+    pid_t pid1, pid2;
+    int status;
+
+
+    // Memória compartilhada para m1 e m2
+    seg1 = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR);
+    seg2 = shmget(IPC_PRIVATE, sizeof(int), IPC_CREAT | S_IRUSR | S_IWUSR);
+
+
+    if (seg1 == -1 || seg2 == -1) {
+        perror("Erro ao criar memória compartilhada");
+        exit(-1);
+    }
+
+
+    // Inicializa os valores
+    m1 = (int *)shmat(seg1, NULL, 0);
+    m2 = (int *)shmat(seg2, NULL, 0);
+    *m1 = 0;
+    *m2 = 0;
+    shmdt(m1);
+    shmdt(m2);
+
+
+    // filho 1
+    if ((pid1 = fork()) < 0) {
+        perror("Erro ao criar processo filho 1");
+        exit(-1);
+    }
+
+
+    if (pid1 == 0) {
+        char seg1_str[20];
+        sprintf(seg1_str, "%d", seg1);
+        execlp("./filho1", "filho1", seg1_str, NULL);
+        perror("Erro ao executar filho1");
+        exit(-1);
+    }
+
+
+    // filho 2
+    if ((pid2 = fork()) < 0) {
+        perror("Erro ao criar processo filho 2");
+        exit(-1);
+    }
+
+
+    if (pid2 == 0) {
+        char seg2_str[20];
+        sprintf(seg2_str, "%d", seg2);
+        execlp("./filho2", "filho2", seg2_str, NULL);
+        perror("Erro ao executar filho2");
+        exit(-1);
+    }
+
+
+    // pai
+    m1 = (int *)shmat(seg1, NULL, 0);
+    m2 = (int *)shmat(seg2, NULL, 0);
+
+
+    // waiting
+    while (*m1 == 0 || *m2 == 0) {
+        sleep(1);
+    }
+
+
+    int result = (*m1) * (*m2);
+    printf("Processo pai: O produto de %d e %d é %d\n", *m1, *m2, result);
+
+
+    waitpid(pid1, &status, 0);
+    waitpid(pid2, &status, 0);
+
+
+    shmdt(m1);
+    shmdt(m2);
+    shmctl(seg1, IPC_RMID, NULL);
+    shmctl(seg2, IPC_RMID, NULL);
+
+
+    return 0;
+}
+
+
+Código fonte do programa filho1.c:
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+
+int main(int argc, char *argv[]) {
+    if (argc != 2) {
+        fprintf(stderr, "Uso: %s <segmento_shm>\n", argv[0]);
+        exit(-1);
+    }
+
+
+    int seg1 = atoi(argv[1]);
+    int *m1 = (int *)shmat(seg1, NULL, 0);
+    if (m1 == (void *)-1) {
+        perror("Erro ao associar a memória compartilhada");
+        exit(-1);
+    }
+
+
+    srand(time(NULL));
+    sleep(rand() % 3);
+
+
+    *m1 = rand() % 100;
+    printf("Filho 1 gerou: %d\n", *m1);
+
+
+    shmdt(m1);
+    exit(0);
+}
+
+
+Código fonte do programa filho2.c:
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+
+int main(int argc, char *argv[]) {
+    if (argc != 2) {
+        fprintf(stderr, "Uso: %s <segmento_shm>\n", argv[0]);
+        exit(-1);
+    }
+
+
+    int seg2 = atoi(argv[1]);
+    int *m2 = (int *)shmat(seg2, NULL, 0);
+    if (m2 == (void *)-1) {
+        perror("Erro ao associar a memória compartilhada");
+        exit(-1);
+    }
+
+
+    srand(time(NULL) + 1);
+    sleep(rand() % 3);
+
+
+    *m2 = rand() % 100;
+    printf("Filho 2 gerou: %d\n", *m2);
+
+
+    shmdt(m2);
+    exit(0);
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+~/inf1316/lab2$ gcc -o filho1 filho1.c
+~/inf1316/lab2$ gcc -o filho2 filho2.c
+~/inf1316/lab2$ gcc -o main q4.c
+~/inf1316/lab2$ ./main
+
+
+Saída gerada:
+Filho 1 gerou: 34
+Filho 2 gerou: 72
+Processo pai: O produto de 34 e 72 é 2448
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+O programa mostra na prática como processos independentes podem trabalhar juntos usando memória compartilhada. O pai cria duas áreas de memória e dois processos filhos - cada filho gera um número aleatório em sua área, depois de um tempo aleatório de espera. Enquanto isso, o pai fica verificando quando os dois números estão prontos. Quando ambos valores aparecem, ele faz a multiplicação e mostra o resultado.
+O que chama atenção é como algo simples - um loop checando a memória - resolve o problema de sincronização sem complicação. Claro que em programas maiores seriam necessárias técnicas mais robustas, mas para este caso, a simplicidade funciona. O produto final prova que a comunicação entre processos aconteceu como planejado.

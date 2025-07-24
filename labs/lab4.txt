@@ -1,0 +1,326 @@
+﻿[INF1316] Lab 4 - Luana Pinho Bueno Penha (2312082), Theo Jesus Canuto de Sousa (2311293)
+
+
+1. (Questão 5) Faça um programa que leia 2 números e imprima o resultado das 4 operações básicas sobre estes 2 números. Verifique o que acontece se o 2º. número da entrada for 0 (zero). Capture o sinal de erro de floating point (SIGFPE) e repita a experiência anterior
+
+
+Código fonte do programa q1.c:
+
+
+#include <stdio.h>
+int main(void){
+  int a, b;
+ 
+  printf("entre com o primeiro numero: ");
+  scanf("%d", &a);
+  printf("entre com o segundo numero: ");
+  scanf("%d", &b);
+
+
+  printf("%d + %d = %d\n", a, b, a+b);
+  printf("%d - %d = %d\n", a, b, a-b);
+  printf("%d * %d = %d\n", a, b, a*b);
+  printf("%d / %d = %d\n", a, b, a/b);
+ 
+  return 0;
+}
+
+
+Código fonte do programa q1_ sigfpe.c:
+
+
+#include <stdio.h>
+#include <signal.h>
+#include <stdlib.h>
+
+
+void sinal(int sinal){
+  printf("erro! nao existe divisao por 0!\n");
+  exit(1);
+}
+
+
+int main(void){
+  int a, b;
+  signal(SIGFPE, sinal);
+  printf("entre com o primeiro numero: ");
+  scanf("%d", &a);
+  printf("entre com o segundo numero: ");
+  scanf("%d", &b);
+
+
+  printf("%d + %d = %d\n", a, b, a+b);
+  printf("%d - %d = %d\n", a, b, a-b);
+  printf("%d * %d = %d\n", a, b, a*b);
+  printf("%d / %d = %d\n", a, b, a/b);
+
+
+  return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+~/inf1316/lab4$ gcc -o main q1.c
+~/inf1316/lab4$ ./main
+e
+~/inf1316/lab4$ gcc -o main q1_ sigfpe.c
+~/inf1316/lab4$ ./main
+
+
+Saída gerada:
+
+
+* teste aleatório (sem e com SIGFPE:
+entre com o primeiro numero: 4
+entre com o segundo numero: 5
+4 + 5 = 9
+4 - 5 = -1
+4 * 5 = 20
+4 / 5 = 0
+     
+* teste com 0 sem SIGFPE
+entre com o primeiro numero: 9
+entre com o segundo numero: 0
+9 + 0 = 9
+9 - 0 = 9
+9 * 0 = 0
+Floating point exception (core dumped)
+
+
+* teste com 0 com SIGFPE
+entre com o primeiro numero: 9
+entre com o segundo numero: 0
+9 + 0 = 9
+9 - 0 = 9
+9 * 0 = 0
+erro! nao existe divisao por 0!
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+
+
+Os resultados demonstram como o sistema operacional lida com operações inválidas, como a divisão por zero. No primeiro programa (q1.c), quando o segundo número é zero, o sistema gera uma exceção de floating point (SIGFPE), interrompendo o processo abruptamente ("Floating point exception"). Isso ocorre porque a divisão por zero é uma operação indefinida na aritmética de inteiros, e o sinal SIGFPE é enviado pelo kernel para encerrar o programa, evitando comportamentos imprevisíveis. Já no segundo programa (q1_sigfpe.c), o sinal é capturado por um handler personalizado, que imprime uma mensagem de erro e finaliza o processo de forma controlada (exit(1)). Isso ilustra como os sinais do sistema operacional (como SIGFPE) podem ser gerenciados para tratar erros de forma mais elegante, evitando terminações bruscas.
+
+
+2. (Questão 6) Faça um programa para monitorar e informar o preço de chamadas telefônicas. O programa deverá ser executado em background. O início e o término de uma chamada são informados através dos sinais SIGUSR1 e SIGUSR2, respectivamente. O custo da ligação é de 2 centavos por segundo, para ligações de até 1 minuto ou de 1 centavo por segundo a partir do 2º. minuto, ou seja, uma ligação de 1m30s custa R$1,50.
+
+
+Código fonte do programa q2.c:
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <signal.h>
+#include <time.h>
+#include <unistd.h>
+
+
+time_t inicio_chamada = 0;
+int chamada_ativa = 0;
+
+
+void iniciar_chamada(int sig) {
+   if (!chamada_ativa) {
+       inicio_chamada = time(NULL);
+       chamada_ativa = 1;
+       printf("Chamada iniciada em: %s", ctime(&inicio_chamada));
+   } else {
+       printf("Já existe uma chamada em andamento.\n");
+   }
+}
+
+
+void terminar_chamada(int sig) {
+   if (chamada_ativa) {
+       time_t fim_chamada = time(NULL);
+       double duracao = difftime(fim_chamada, inicio_chamada);
+      
+       float custo = (duracao <= 60) ? duracao * 0.02 : (60 * 0.02) + ((duracao - 60) * 0.01);
+      
+      
+       printf("Chamada terminada em: %s", ctime(&fim_chamada));
+       printf("Duração: %.0f segundos\n", duracao);
+       printf("Custo da chamada: R$ %.2f\n", custo);
+      
+       chamada_ativa = 0;
+   } else {
+       printf("Não existe nenhuma chamada.\n");
+   }
+}
+
+
+int main() {
+   signal(SIGUSR1, iniciar_chamada);
+   signal(SIGUSR2, terminar_chamada);
+  
+   printf("Monitor de Chamadas Telefônicas - PID: %d\n", getpid());
+  
+   while(1) {
+       pause();
+   }
+  
+   return 0;
+}
+
+
+
+
+Linhas de comando para compilação e execução do programa:
+~/inf1316/lab4$ gcc q2.c -o monitor_chamadas
+~/inf1316/lab4$ ./monitor_chamadas &        
+
+
+Saída gerada:
+Após comandos de compilação e execução, me retornou: 
+[1] 14775
+Monitor de Chamadas Telefônicas - PID: 14775
+Inseri o comando: kill -SIGUSR1 14775         
+Chamada iniciada em: Tue Apr 15 12:04:30 2025                                          
+Inseri o comando: kill -SIGUSR2 14775        
+Chamada terminada em: Tue Apr 15 12:04:45 2025
+Duração: 90 segundos                                                                   
+Custo da chamada: R$ 1.50
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+ 
+O programa foi feito para ficar em background esperando sinais. Ao receber SIGUSR1, ele registra o tempo de início da chamada, e com SIGUSR2 calcula a duração e o custo com base na fórmula dada. Usei signal() para configurar os tratadores, pause() para manter o processo aguardando e time()/difftime() para medir o tempo. O cálculo do valor usa uma condição ternária para aplicar a regra dos centavos por segundo. Isso mostra como sinais podem ser usados para controlar e comunicar eventos entre processos.
+
+
+3. (Questão 7) Elabore três programas I/O bound que não terminem (loop de msgs no vídeo). Elabore um programa que seja capaz de executar os 3 programas indicados anteriormente e que simule o compartilhamento da CPU entre os 3 processos com escalonamento Round-Robin com uma fatia de tempo de 1 segundo para o primeiro processo e de 2 segundos para os demais processos. Execute os programas e relate o que aconteceu.
+
+
+Código fonte do programa q3_1.c:
+
+
+#include <stdio.h>
+int main(void){
+  while (1) printf("oi theo\n");
+  return 0;
+}
+
+
+Código fonte do programa q3_2.c:
+
+
+#include <stdio.h>
+int main(void){
+  while (1) printf("oi luana\n");
+  return 0;
+}
+
+
+Código fonte do programa q3_3.c:
+
+
+#include <stdio.h>
+int main(void){
+  while (1) printf("tchau theo e luana\n");
+  return 0;
+}
+
+
+Código fonte do programa q3.c:
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+
+
+#define NUM_CHILDREN 3
+
+
+int main() {
+   pid_t children[NUM_CHILDREN];
+   int execution_times[NUM_CHILDREN] = {1, 2, 2}; // tempos para cada filho
+   int current_child = 0;
+
+
+   for (int i = 0; i < NUM_CHILDREN; i++) {
+       pid_t pid = fork();
+
+
+       if (pid < 0) {
+           perror("Fork failed");
+           exit(EXIT_FAILURE);
+       } else if (pid == 0) {
+           switch(i) {
+               case 0:
+                   execl("./q3_1", "q3_1", NULL);
+                   break;
+               case 1:
+                   execl("./q3_2", "q3_2", NULL);
+                   break;
+               case 2:
+                   execl("./q3_3", "q3_3", NULL);
+                   break;
+           }
+           perror("Exec failed");
+           exit(EXIT_FAILURE);
+       } else {
+           children[i] = pid;
+           if (i != 0) {
+               kill(children[i], SIGSTOP);
+           }
+       }
+   }
+
+
+   printf("Pai: Todos os filhos criados. Iniciando escalonamento infinito...\n");
+   printf("Pai: Ctrl+C para terminar (os filhos continuarão executando)\n");
+
+
+   while (1) {
+       printf("\nPai: Executando filho %d por %d segundos\n", current_child + 1, execution_times[current_child]);
+
+
+       sleep(execution_times[current_child]);
+
+
+       kill(children[current_child], SIGSTOP);
+       printf("Pai: Filho %d pausado\n", current_child + 1);
+
+
+       current_child = (current_child + 1) % NUM_CHILDREN;
+
+
+       kill(children[current_child], SIGCONT);
+       printf("Pai: Filho %d continuado\n", current_child + 1);
+   }
+
+
+   return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+~/inf1316/lab4$ gcc -o q3_1 q3_1.c
+~/inf1316/lab4$ gcc -o q3_2 q3_2.c
+~/inf1316/lab4$ gcc -o q3_3 q3_3.c
+~/inf1316/lab4$ gcc -o main q3.c
+~/inf1316/lab4$ ./main
+
+
+Saída gerada:
+
+
+Loop de "oi theo" linha a linha por 1 segundo
+Loop de "oi luana" linha a linha por 2 segundos
+Loop de "tchau theo tchau luana" linha a linha por 2 segundos
+
+
+Isso tudo em loop de 5 em 5 segundos infinitamente até que manualmente (ctrl-c) o processo fosse parado.
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+
+
+        O experimento demonstra o funcionamento do escalonamento Round-Robin, onde a CPU é compartilhada entre processos em fatias de tempo predefinidas. O programa pai (q3.c) atua como um escalonador, controlando a execução dos três processos filhos (q3_1, q3_2, q3_3). A saída mostra que os processos rodam em ciclos, alternando conforme o tempo alocado, evidenciando como um sistema operacional gerencia a concorrência entre tarefas I/O bound

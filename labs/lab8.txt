@@ -1,0 +1,521 @@
+﻿[INF1316] Lab 8 - Luana Pinho Bueno Penha (2312082), Theo Jesus Canuto de Sousa (2311293)
+
+
+1. Faça um programa que usa myallocate para alocar e desalocar memória dinamicamente.
+
+
+Código fonte do programa q1.c:
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+
+
+static void *memorypool;
+
+
+void init_memory_pool(void) {
+    memorypool = sbrk(0);
+}
+
+
+void *myallocate(int n) {
+    void *p = sbrk(n);
+    if (p == (void*)-1) {
+        perror("sbrk");
+        exit(EXIT_FAILURE);
+    }
+    return p;
+}
+
+
+void reset_memory_pool(void) {
+    brk(memorypool);
+}
+
+
+int main(void) {
+
+
+    init_memory_pool();
+
+
+    char *buf = myallocate(100);
+    strcpy(buf, "hello world");
+    printf("%s\n", buf);
+
+
+    int *arr = myallocate(sizeof(*arr) * 10);
+    for (int i = 0; i < 10; i++) arr[i] = i * i;
+    for (int i = 0; i < 10; i++) printf("%d ", arr[i]);
+    putchar('\n');
+
+
+    reset_memory_pool();
+
+
+    return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+~/inf1316/lab8$ gcc -o q1 q1.c
+~/inf1316/lab8$ ./q1
+
+
+Saída gerada:
+hello world
+0 1 4 9 16 25 36 49 64 81
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+
+
+O resultado demonstra que o nosso alocador “bump” reserva e libera corretamente o espaço de heap usando sbrk/brk. Ao chamar myallocate(100), o sbrk avança o break do programa em 100 bytes, permitindo armazenar “hello world” com segurança; da mesma forma, a alocação para dez inteiros fornece um bloco contíguo suficiente para guardar os valores ao quadrado. Como imprimimos antes de chamar reset_memory_pool(), todos os dados permanecem válidos até a saída. Por fim, reset_memory_pool() restaura o break ao endereço original, liberando em bloco todas as alocações feitas, o que confirma que o alocador e o desalocador funcionam conforme o esperado.
+
+
+2. Execute map-exemplo.c passando o nome de um arquivo como parâmetro. Qual foi a novidade?
+
+
+Código fonte do programa map-exemplo.c :
+
+
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <stdlib.h>
+
+
+int main (int argc, char *argv[]){
+    struct stat sb;
+    off_t len;
+    char *p; int fd;
+    
+    if (argc < 2) { fprintf (stderr, "usage: %s <file>\n", !!!argv[0]); exit(1); }
+
+
+    fd = open (argv[1], O_RDONLY);
+
+
+    if (fd == -1) { perror ("open"); exit(1); }
+
+
+    if (fstat(fd, &sb)== -1) { perror ("fstat"); exit(1); }
+
+
+    if (!S_ISREG (sb.st_mode)) { fprintf (stderr, "%s is not a file\n", argv[1]); exit(1);}
+
+
+    p = mmap (0, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
+
+
+    if (p == MAP_FAILED) { perror ("mmap"); exit(1); }
+
+
+    if (close (fd) == -1) { perror ("close"); exit(1); }
+    
+    for (len = 0; len < sb.st_size; len++) putchar (p[len]);
+    
+    if (munmap (p, sb.st_size) == -1) {
+        perror ("munmap");
+    
+        exit(1);
+    }
+    
+    return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+~/inf1316/lab8$ gcc -o map map-exemplo.c
+~/inf1316/lab8$ ./map q1.c
+
+
+Saída gerada:
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+
+
+static void *memorypool;
+
+
+void init_memory_pool(void) {
+    memorypool = sbrk(0);
+}
+
+
+void *myallocate(int n) {
+    void *p = sbrk(n);
+    if (p == (void*)-1) {
+        perror("sbrk");
+        exit(EXIT_FAILURE);
+    }
+    return p;
+}
+
+
+void reset_memory_pool(void) {
+    brk(memorypool);
+}
+
+
+int main(void) {
+
+
+    init_memory_pool();
+
+
+    char *buf = myallocate(100);
+    strcpy(buf, "hello world");
+    printf("%s\n", buf);
+
+
+    int *arr = myallocate(sizeof(*arr) * 10);
+    for (int i = 0; i < 10; i++) arr[i] = i * i;
+    for (int i = 0; i < 10; i++) printf("%d ", arr[i]);
+    putchar('\n');
+
+
+    reset_memory_pool();
+
+
+    return 0;
+}
+
+
+Reflexão sobre a razão de ter obtido esse resultado: 
+
+
+O resultado foi obtido através do uso de mmap, que mapeia o arquivo diretamente no espaço de memória do processo em vez de ler blocos via chamadas de I/O padrão. Assim, o ponteiro p aponta para o conteúdo do arquivo e podemos percorrê-lo como se fosse um array em memória, sem precisar chamar read() repetidamente. Essa abordagem traz ganho de eficiência e simplifica o código, pois o sistema operacional lida com o carregamento e paginação dos dados de forma transparente.
+
+
+3. Modifique map-exemplo.c para:
+   1. Verificar quantas páginas de memória o seu arquivo precisou:
+
+
+Código fonte do programa map-3a.c:
+
+
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <stdlib.h>
+
+
+int main (int argc, char *argv[]){
+    struct stat sb;
+    off_t len;
+    char *p;
+    int fd;
+    long page_size;
+    long num_pages;
+
+
+    if (argc < 2) {
+        fprintf(stderr, "usage: %s <file>\n", argv[0]);
+        exit(1);
+    }
+
+
+    fd = open(argv[1], O_RDONLY);
+    if (fd == -1) { perror("open"); exit(1); }
+    if (fstat(fd, &sb) == -1) { perror("fstat"); exit(1); }
+    if (!S_ISREG(sb.st_mode)) {
+        fprintf(stderr, "%s is not a file\n", argv[1]);
+        exit(1);
+    }
+
+
+    p = mmap(0, sb.st_size, PROT_READ, MAP_SHARED, fd, 0);
+    if (p == MAP_FAILED) { perror("mmap"); exit(1); }
+    close(fd);
+
+
+    for (len = 0; len < sb.st_size; len++)
+        putchar(p[len]);
+
+
+    page_size = sysconf(_SC_PAGESIZE);
+    num_pages = (sb.st_size + page_size - 1) / page_size;
+    fprintf(stderr,
+        "\nTamanho do file: %lld bytes\n"
+        "Tamanho da página: %ld bytes\n"
+        "Páginas necessárias: %ld\n",
+        (long long)sb.st_size, page_size, num_pages);
+
+
+    if (munmap(p, sb.st_size) == -1) {
+        perror("munmap");
+        exit(1);
+    }
+
+
+    return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+~/inf1316/lab8$ gcc -o map map-3a.c
+~/inf1316/lab8$ ./map q1.c
+
+
+Saída gerada:
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+
+
+static void *memorypool;
+
+
+void init_memory_pool(void) {
+    memorypool = sbrk(0);
+}
+
+
+void *myallocate(int n) {
+    void *p = sbrk(n);
+    if (p == (void*)-1) {
+        perror("sbrk");
+        exit(EXIT_FAILURE);
+    }
+    return p;
+}
+
+
+void reset_memory_pool(void) {
+    brk(memorypool);
+}
+
+
+int main(void) {
+
+
+    init_memory_pool();
+
+
+    char *buf = myallocate(100);
+    strcpy(buf, "hello world");
+    printf("%s\n", buf);
+
+
+    int *arr = myallocate(sizeof(*arr) * 10);
+    for (int i = 0; i < 10; i++) arr[i] = i * i;
+    for (int i = 0; i < 10; i++) printf("%d ", arr[i]);
+    putchar('\n');
+
+
+    reset_memory_pool();
+
+
+    return 0;
+}
+
+
+Tamanho do file: 782 bytes
+Tamanho da página: 4096 bytes
+Páginas necessárias: 1
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+
+
+Este resultado ocorre porque o mapeamento em memória é sempre feito em unidades de página (não existe 0.5 página, por exemplo) e, mesmo que o file tenha apenas 782 bytes, o SO reserva pelo menos uma página inteira (4096 bytes) para o mmap. Por isso, ao calcular (sb.st_size + page_size - 1) / page_size, obtemos 1 página - mesmo que o file ocupe só uma fração desse espaço, o mapeamento mínimo é de uma página completa.
+
+
+   2. Medir o quão mais rápido foi a escrita do arquivo mapeado quando comparado com a E/S em disco. Dica: use gettimeofday()
+
+
+Código fonte do programa map-3b.c:
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/time.h>
+#include <errno.h>
+
+
+static inline long elapsed_us(struct timeval *start, struct timeval *end) {
+    return (end->tv_sec - start->tv_sec) * 1000000L
+         + (end->tv_usec - start->tv_usec);
+}
+
+
+int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        fprintf(stderr, "Uso: %s <arquivo_de_entrada>\n", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+
+
+    const char *infile = argv[1];
+    const char *out_disk = "saida_disk.bin";
+    const char *out_mmap = "saida_mmap.bin";
+    struct stat sb;
+    int fd_in, fd_out;
+    char *buffer;
+    struct timeval t0, t1;
+    long time_disk, time_mmap;
+
+
+    /* 1) Abre e lê todo o arquivo em buffer */
+    fd_in = open(infile, O_RDONLY);
+    if (fd_in < 0) {
+        perror("open entrada");
+        exit(EXIT_FAILURE);
+    }
+    if (fstat(fd_in, &sb) < 0) {
+        perror("fstat");
+        close(fd_in);
+        exit(EXIT_FAILURE);
+    }
+    off_t size = sb.st_size;
+    buffer = malloc(size);
+    if (!buffer) {
+        perror("malloc");
+        close(fd_in);
+        exit(EXIT_FAILURE);
+    }
+    if (read(fd_in, buffer, size) != size) {
+        perror("read");
+        free(buffer);
+        close(fd_in);
+        exit(EXIT_FAILURE);
+    }
+    close(fd_in);
+
+
+    /* 2) Escrita via write() */
+    gettimeofday(&t0, NULL);
+    fd_out = open(out_disk, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+    if (fd_out < 0) {
+        perror("open saida_disk");
+        free(buffer);
+        exit(EXIT_FAILURE);
+    }
+    if (write(fd_out, buffer, size) != size) {
+        perror("write");
+        free(buffer);
+        close(fd_out);
+        exit(EXIT_FAILURE);
+    }
+    close(fd_out);
+    gettimeofday(&t1, NULL);
+    time_disk = elapsed_us(&t0, &t1);
+
+
+    fd_out = open(out_mmap, O_RDWR | O_CREAT | O_TRUNC, 0666);
+    if (fd_out < 0) {
+        perror("open saida_mmap");
+        free(buffer);
+        exit(EXIT_FAILURE);
+    }
+    if (ftruncate(fd_out, size) < 0) {
+        perror("ftruncate");
+        free(buffer);
+        close(fd_out);
+        exit(EXIT_FAILURE);
+    }
+
+
+    gettimeofday(&t0, NULL);
+    char *p = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd_out, 0);
+    if (p == MAP_FAILED) {
+        perror("mmap saida");
+        free(buffer);
+        close(fd_out);
+        exit(EXIT_FAILURE);
+    }
+    memcpy(p, buffer, size);
+    if (msync(p, size, MS_SYNC) < 0) {
+        perror("msync");
+    }
+    munmap(p, size);
+    close(fd_out);
+    gettimeofday(&t1, NULL);
+    time_mmap = elapsed_us(&t0, &t1);
+
+
+    free(buffer);
+
+
+    printf("Escrita via write(): %ld µs\n", time_disk);
+    printf("Escrita via mmap(): %ld µs\n", time_mmap);
+    printf("Speedup: %.2fx\n", (double)time_disk / (double)time_mmap);
+
+
+    return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+~/inf1316/lab8$ gcc -o map map-3b.c
+~/inf1316/lab8$ ./map q1.c
+
+
+Saída gerada (rodamos algumas vezes para observar diferentes execuções):
+
+
+Escrita via write(): 1425 µs
+Escrita via mmap(): 2655 µs
+Speedup: 0.54x
+_____________________________
+Escrita via write(): 1515 µs
+Escrita via mmap(): 2634 µs
+Speedup: 0.58x
+_____________________________
+Escrita via write(): 1413 µs
+Escrita via mmap(): 2047 µs
+Speedup: 0.69x
+_____________________________
+Escrita via write(): 1588 µs
+Escrita via mmap(): 2556 µs
+Speedup: 0.62x
+_____________________________
+Escrita via write(): 1244 µs
+Escrita via mmap(): 1891 µs
+Speedup: 0.66x
+_____________________________
+Escrita via write(): 1356 µs
+Escrita via mmap(): 2590 µs
+Speedup: 0.52x
+_____________________________
+Escrita via write(): 1464 µs
+Escrita via mmap(): 1977 µs
+Speedup: 0.74x
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+
+
+A razão de o mmap ter saído mais lento (speedup < 1) é que, além de fazer o memcpy, ainda precisamos do msync para garantir que todas as páginas sejam escritas de volta ao disco - o que força uma operação síncrona e adiciona overhead considerável. Em contraste, a chamada write() é bufferizada pelo kernel e retorna antes do flush físico, ficando muito mais rápida para arquivos pequenos. Além disso, o custo de criar e desmontar o mapeamento de memória (incluindo page faults iniciais) não compensa quando o volume de dados é pouco, fazendo o método de mmap perder para a E/S tradicional nesse cenário específico.

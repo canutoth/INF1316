@@ -1,0 +1,497 @@
+﻿[INF1316] Lab 7 - Luana Pinho Bueno Penha (2312082), Theo Jesus Canuto de Sousa (2311293)
+
+
+1. Abra duas seções de terminais: Na primeira, execute um programa que fica em loop lendo de uma FIFO para depois escrever na saída padrão (tela).  Na segunda, execute um programa que fica lendo da entrada padrão (teclado) e depois escreve na mesma FIFO. 
+
+
+Código fonte do programa reader.c:
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+
+int main() {
+    int fd;
+    char buffer[256];
+    ssize_t nbytes;
+
+
+    // Abre a FIFO pra leitura (bloqueia até o writer abrir)
+    fd = open("minha_fifo", O_RDONLY);
+    if (fd < 0) {
+        perror("open leitor");
+        exit(EXIT_FAILURE);
+    }
+
+
+    // Loop infinito de leitura
+    while (1) {
+        nbytes = read(fd, buffer, sizeof(buffer) - 1);
+        if (nbytes < 0) {
+            perror("read");
+            close(fd);
+            exit(EXIT_FAILURE);
+        }
+        if (nbytes == 0) {
+            // EOF (normalmente quando o outro lado fechou)
+            break;
+        }
+        buffer[nbytes] = '\0';
+        printf("%s", buffer);
+        fflush(stdout);
+    }
+
+
+    close(fd);
+    return 0;
+}
+
+
+Código fonte do programa writer.c:
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <string.h>
+
+
+int main() {
+    int fd;
+    char buffer[256];
+
+
+    // Abre a FIFO pra escrita (bloqueia até o reader abrir)
+    fd = open("minha_fifo", O_WRONLY);
+    if (fd < 0) {
+        perror("open escritor");
+        exit(EXIT_FAILURE);
+    }
+
+
+    // Loop infinito de leitura do teclado e escrita na FIFO
+    while (1) {
+        if (fgets(buffer, sizeof(buffer), stdin) == NULL) {
+            // Ctrl+D ou erro no stdin
+            break;
+        }
+        write(fd, buffer, strlen(buffer));
+    }
+
+
+    close(fd);
+    return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+Terminal 1:
+~/inf1316/lab7$ mkfifo minha_fifo
+~/inf1316/lab7$ gcc -o reader reader.c
+~/inf1316/lab7$ gcc -o writer writer.c
+~/inf1316/lab7$ ./reader
+
+
+Terminal 2:
+~/inf1316/lab7$ ./writer
+ola mundo
+aaaa
+meu nome eh theo
+oi luana
+
+
+Saída gerada (no terminal 1, do reader):
+ola mundo
+aaaa
+meu nome eh theo
+oi luana
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+
+
+O FIFO é tipo um cano entre dois processos: o reader só começa a receber bytes quando o writer abre a FIFO, e tudo que o writer escreve ali cai direto no buffer do kernel até o reader ler e imprimir. Como o reader ficou bloqueado no read() até o writer mandar algo, tudo que foi digitado no writer apareceu na tela do reader. Quando o writer fecha (Ctrl+D), o FIFO sinaliza EOF ou zero bytes lidos, o read() retorna 0 e o loop do reader encerra. É por isso que o terminal 1 exibiu exatamente o que foi digitado no terminal 2.
+
+
+2. Escreva um programa que primeiro cria uma FIFO e em seguida cria dois processos filhos que escrevem uma string na FIFO. O pai dá um waitpid em seguida lê as strings desse FIFO e exibe na tela.
+
+
+Código fonte do programa q2.c:
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <string.h>
+
+
+#define FIFO_NAME "myfifo"
+
+
+int main(void) {
+   int fd;
+   char msg[50];
+   int pids[2];
+   char buf[100];
+
+
+   if (mkfifo(FIFO_NAME, 0666) < 0) {
+       perror("mkfifo");
+       fflush(stdout);
+       exit(EXIT_FAILURE);
+   }
+
+
+   for (int i = 0; i < 2; i++) {
+       pid_t pid = fork();
+       pids[i] = pid;
+       if (pid < 0) {
+           perror("fork");
+           fflush(stdout);
+           exit(EXIT_FAILURE);
+       }
+
+
+       if (pid == 0) {
+           sprintf(msg, "Olá, eu sou o pid %d\n", getpid());
+  
+           fd = open(FIFO_NAME, O_WRONLY);
+           if (fd < 0) {
+               perror("child open");
+               fflush(stdout);
+               exit(EXIT_FAILURE);
+           }
+
+
+           write(fd, msg, strlen(msg));
+           close(fd);
+           exit(EXIT_SUCCESS);
+
+
+       }
+         
+   }
+
+
+   fd = open(FIFO_NAME, O_RDONLY);
+   if (fd < 0) {
+       perror("parent open");
+       exit(EXIT_FAILURE);
+   }
+
+
+   for (int i = 0; i < 2; i++) {
+       waitpid(pids[i], NULL, 0);
+   }
+
+
+   ssize_t n;
+   while ((n = read(fd, buf, sizeof(buf) - 1)) > 0) {
+       buf[n] = '\0';
+       printf("%s", buf);
+   }
+   close(fd);
+  
+   return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+gcc -o main q2.c
+./main 
+
+
+Saída gerada:
+Olá, eu sou o pid 1917
+Olá, eu sou o pid 1918
+
+
+Reflexão sobre a razão de ter obtido esse resultado: 
+O pai abre a FIFO para leitura antes de chamar waitpid pra não travar: se esperasse os filhos escreverem sem ter quem leia, o open em modo leitura nunca sairia do bloqueio. Os dois filhos escrevem mensagens pequenas e fecham logo em seguida, então o pai encontra tudo pronto para ler. Como não tem controle de ordem, a saída pode mudar a cada execução — quem ganhar o scheduler escreve primeiro. E, como o buffer de 100 bytes dá conta das duas mensagens, o read às vezes traz tudo de uma vez, às vezes traz em pedaços. Mesmo que role essa variação, no fim o pai sempre exibe todas as mensagens.
+
+
+3. Escreva um servidor e um cliente usando duas FIFOs: uma para enviar strings para o servidor, e outra para transmitir as respostas de volta para os clientes. O servidor deverá rodar em background e transformar cada palavra recebida de minúsculas para maiúsculas. Obs: execute os seus clientes em terminais diferentes.
+
+
+Código fonte do programa server.c:
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+
+#define REQUEST_FIFO "/tmp/fifo_request"
+#define BUFFER_SIZE 512
+
+
+int main() {
+    char buffer[BUFFER_SIZE];
+    int fd_req;
+    
+    if (access(REQUEST_FIFO, F_OK) == -1) {
+        if (mkfifo(REQUEST_FIFO, 0666) < 0) {
+            perror("mkfifo request");
+            exit(1);
+        }
+    }
+    
+    fd_req = open(REQUEST_FIFO, O_RDONLY);
+    if (fd_req < 0) {
+        perror("open request fifo");
+        exit(1);
+    }
+
+
+    while (1) {
+        ssize_t bytes = read(fd_req, buffer, BUFFER_SIZE - 1);
+        if (bytes <= 0) {
+            close(fd_req);
+            fd_req = open(REQUEST_FIFO, O_RDONLY);
+            continue;
+        }
+        buffer[bytes] = '\0';
+        
+        if (buffer[bytes - 1] == '\n') {
+            buffer[bytes - 1] = '\0';
+        }
+
+
+        char *sep = strchr(buffer, ':');
+        if (!sep) continue;
+        *sep = '\0';
+        char *pid_str = buffer;
+        char *texto = sep + 1;
+        
+        char fifo_reply[64];
+        snprintf(fifo_reply, sizeof(fifo_reply), "/tmp/fifo_reply_%s", pid_str);
+
+
+        for (int i = 0; texto[i]; i++) {
+            texto[i] = toupper((unsigned char)texto[i]);
+        }
+
+
+        int fd_resp = open(fifo_reply, O_WRONLY);
+        if (fd_resp < 0) {
+            perror("open reply fifo");
+            continue;
+        }
+        write(fd_resp, texto, strlen(texto));
+        write(fd_resp, "\n", 1);
+        close(fd_resp);
+    }
+
+
+    close(fd_req);
+    
+    return 0;
+}
+
+
+Código fonte do programa clientA.c:
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+
+#define REQUEST_FIFO "/tmp/fifo_request"
+#define BUFFER_SIZE 512
+
+
+int main() {
+    char reply_fifo[64];
+    char message[BUFFER_SIZE];
+    pid_t pid = getpid();
+
+
+    snprintf(reply_fifo, sizeof(reply_fifo), "/tmp/fifo_reply_%d", pid);
+    if (mkfifo(reply_fifo, 0666) < 0) {
+        if (access(reply_fifo, F_OK) == -1) {
+            perror("mkfifo reply");
+            exit(1);
+        }
+    }
+
+
+    printf("client A: ");
+    if (!fgets(message, BUFFER_SIZE, stdin)) {
+        perror("fgets");
+        exit(1);
+    }
+    size_t len = strlen(message);
+    if (message[len - 1] == '\n') {
+        message[len - 1] = '\0';
+    }
+
+
+    int fd_req = open(REQUEST_FIFO, O_WRONLY);
+    if (fd_req < 0) {
+        perror("open request fifo");
+        exit(1);
+    }
+
+
+    char sendbuf[BUFFER_SIZE];
+    snprintf(sendbuf, sizeof(sendbuf), "%d:%s\n", pid, message);
+    write(fd_req, sendbuf, strlen(sendbuf));
+    close(fd_req);
+
+
+    int fd_resp = open(reply_fifo, O_RDONLY);
+    if (fd_resp < 0) {
+        perror("open reply fifo");
+        exit(1);
+    }
+
+
+    char resp[BUFFER_SIZE];
+    ssize_t rbytes = read(fd_resp, resp, BUFFER_SIZE - 1);
+    if (rbytes > 0) {
+        resp[rbytes] = '\0';
+        printf("%s", resp);
+    }
+    close(fd_resp);
+
+
+    return 0;
+}
+
+
+Código fonte do programa clientB.c:
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+
+
+#define REQUEST_FIFO "/tmp/fifo_request"
+#define BUFFER_SIZE 512
+
+
+int main() {
+    char reply_fifo[64];
+    char message[BUFFER_SIZE];
+    pid_t pid = getpid();
+
+
+    snprintf(reply_fifo, sizeof(reply_fifo), "/tmp/fifo_reply_%d", pid);
+    if (mkfifo(reply_fifo, 0666) < 0) {
+        if (access(reply_fifo, F_OK) == -1) {
+            perror("mkfifo reply");
+            exit(1);
+        }
+    }
+
+
+    printf("client B: ");
+    if (!fgets(message, BUFFER_SIZE, stdin)) {
+        perror("fgets");
+        exit(1);
+    }
+    size_t len = strlen(message);
+    if (message[len - 1] == '\n') {
+        message[len - 1] = '\0';
+    }
+
+
+    int fd_req = open(REQUEST_FIFO, O_WRONLY);
+    if (fd_req < 0) {
+        perror("open request fifo");
+        exit(1);
+    }
+
+
+    char sendbuf[BUFFER_SIZE];
+    snprintf(sendbuf, sizeof(sendbuf), "%d:%s\n", pid, message);
+    write(fd_req, sendbuf, strlen(sendbuf));
+    close(fd_req);
+
+
+    int fd_resp = open(reply_fifo, O_RDONLY);
+    if (fd_resp < 0) {
+        perror("open reply fifo");
+        exit(1);
+    }
+
+
+    char resp[BUFFER_SIZE];
+    ssize_t rbytes = read(fd_resp, resp, BUFFER_SIZE - 1);
+    if (rbytes > 0) {
+        resp[rbytes] = '\0';
+        printf("%s", resp);
+    }
+    close(fd_resp);
+
+
+    return 0;
+}
+
+
+Linhas de comando para compilação e execução do programa:
+
+
+Terminal 1:
+
+
+~/inf1316/lab7$ gcc -o server server.c
+~/inf1316/lab7$ gcc -o clientA clientA.c
+~/inf1316/lab7$ gcc -o clientB clientB.c
+~/inf1316/lab7$ ./server &
+~/inf1316/lab7$ ./clientA
+~/inf1316/lab7$ client A:
+
+
+Terminal 2:
+~/inf1316/lab7$ ./clientB
+~/inf1316/lab7$ client B:
+
+
+Terminal 1:
+~/inf1316/lab7$ client A: cliente A diz: ola mundo!
+
+
+Terminal 2:
+~/inf1316/lab7$ client B: cliente B diz: tchau tchau mundo!
+
+
+Saída gerada:
+
+
+Terminal 1:
+[1] 540
+client A: CLIENTE A DIZ: OLA MUNDO!
+
+
+Terminal 2:
+client B: CLIENTE B DIZ: TCHAU TCHAU MUNDO!
+
+
+Reflexão sobre a razão de ter obtido esse resultado:
+
+
+O servidor fica pendurado no read() da FIFO de requisição, então quando o Cliente A abre e escreve “cliente A diz: ola mundo!”, o servidor lê essa string (junto do PID dele), converte tudo pra maiúsculas e manda de volta na FIFO de resposta específica desse PID. Como o Cliente A ficou esperando no open() da sua própria FIFO de resposta, ele recebe “CLIENTE A DIZ: OLA MUNDO!” e imprime. O mesmo rolou com o Cliente B: ele abriu sua FIFO, o servidor converteu “cliente B diz: tchau tchau mundo!” pra “CLIENTE B DIZ: TCHAU TCHAU MUNDO!” e mandou só pra FIFO do PID dele. A ordem de quem falou primeiro não misturou as respostas porque cada cliente tem uma FIFO de reply única, e o bloqueio no open() garante que não haja leitura antes de escrita nem escrita sem leitor.
